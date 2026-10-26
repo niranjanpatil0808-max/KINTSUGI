@@ -340,6 +340,12 @@ def make_server(ws: Workspace, host: str = "127.0.0.1", port: int = 8765, token:
                 ws.audit(None, "server-error", f"{type(err).__name__}: {err}")
                 self._json(500, {"error": "internal error (see the audit log)"})
 
+        def _may_see_note(self, note: dict) -> bool:
+            """A note made in a chat is visible to the people in that chat; an old note with no chat (recalled everywhere) only to admins."""
+            if note["room"] is None:
+                return self.who.at_least("admin")
+            return ws.team.can_see_room(self.who, note["room"])
+
         def _get(self, path: str, query: dict):
             if path == "/api/state":
                 # newest message per room, and newest one written by someone other than the reader: that drives "unread"
@@ -347,6 +353,7 @@ def make_server(ws: Workspace, host: str = "127.0.0.1", port: int = 8765, token:
                 latest = {row["room"]: {"last_id": row["last_id"], "last_other": row["last_other"] or 0} for row in ws.db.query(
                     "SELECT room, MAX(id) AS last_id, MAX(CASE WHEN sender != ? THEN id END) AS last_other FROM messages GROUP BY room", (who.name,))}
                 rooms = [r for r in ws.list_rooms() if ws.team.can_see_room(who, r["name"])]
+                pin_counts = {row["room"]: row["n"] for row in ws.db.query("SELECT room, COUNT(*) AS n FROM pins GROUP BY room")}
                 seen = {r["name"] for r in rooms}
                 approvals = [{**a, "can_decide": ws.team.can_decide(who, a), "can_remember": who.role == "owner" and _can_remember(ws, a)}
                              for a in ws.approvals() if a["room"] in seen or who.role == "owner"]
@@ -358,7 +365,7 @@ def make_server(ws: Workspace, host: str = "127.0.0.1", port: int = 8765, token:
                                     "secrets": ws.keychain.names(a["name"]) if who.at_least("admin") else [], "apps": _apps(ws, a["name"]), "plugins": ws.plugins.enabled_for(a["name"]),
                                     "integrations": ws.integrations.enabled_for(a["name"])}
                                    for a in ws.list_agents()],
-                        "rooms": [{**r, "members": ws.members(r["name"]), "brief": ws.get_brief(r["name"]) if r["kind"] == "room" else "", **latest.get(r["name"], {"last_id": 0, "last_other": 0})} for r in rooms],
+                        "rooms": [{**r, "members": ws.members(r["name"]), "brief": ws.get_brief(r["name"]) if r["kind"] == "room" else "", "pins": pin_counts.get(r["name"], 0), **latest.get(r["name"], {"last_id": 0, "last_other": 0})} for r in rooms],
                         "approvals": approvals, "jobs": jobs, "onboarding": self._onboarding(), "busy": [a for a in ws.busy() if self._sees_run(a)], "activity": {a: t for a, t in ws.agent_activity().items() if self._sees_run(a)}, "drafts": {a: t for a, t in ws.agent_drafts().items() if self._sees_run(a)}, "open_tasks": tasks.open_counts(ws, self.who),
                         "deleted": [{"room": d["room"], "id": d["message_id"]} for d in ws.db.query("SELECT room, message_id FROM deleted_messages ORDER BY id DESC LIMIT 200") if d["room"] in seen],
                         "sandbox": sandbox.status(), "provider": ws.provider(), "search_configured": ws.search_settings()["configured"], "internet_enabled": ws.internet_settings()["enabled"],
@@ -484,6 +491,13 @@ def make_server(ws: Workspace, host: str = "127.0.0.1", port: int = 8765, token:
                 if not target.is_file():
                     raise WorkspaceError("no such file")
                 return {"path": query["path"][0], "text": target.read_text(errors="replace")[:100_000]}
+            if path == "/api/pins":
+                room = query["room"][0]
+                if not ws.team.can_see_room(self.who, room):
+                    raise Forbidden("you are not in that room")
+                return [{**p, "text": p["text"][:400]} for p in ws.pins(room)]
+            if path == "/api/notes":  # what an agent remembers, limited to the chats this person can see
+                return [n for n in ws.notes_of(query["agent"][0]) if self._may_see_note(n)]
             if path == "/api/lessons":
                 ws.get_agent(query["agent"][0])
                 return _lessons(ws, query["agent"][0])
@@ -580,6 +594,17 @@ def make_server(ws: Workspace, host: str = "127.0.0.1", port: int = 8765, token:
                     raise WorkspaceError("you can rate agents' replies in your chats")
                 good = body.get("good")
                 personal.record_feedback(ws, "you" if self.who.role == "owner" else self.who.name, int(body["id"]), None if good is None else bool(good))
+                return {"ok": True}
+            if path == "/api/pins/toggle":
+                msg = ws.db.one("SELECT room FROM messages WHERE id = ?", (int(body["id"]),))
+                if msg is None or not ws.team.can_see_room(self.who, msg["room"]):
+                    raise WorkspaceError("no such message")
+                return {"pinned": ws.toggle_pin(int(body["id"]), "you" if self.who.role == "owner" else self.who.name)}
+            if path == "/api/notes/delete":
+                row = ws.db.one("SELECT id, room FROM notes WHERE id = ?", (int(body["id"]),))
+                if row is None or not self._may_see_note(row):
+                    raise WorkspaceError("no such note")
+                ws.delete_note(row["id"], self.who.name)
                 return {"ok": True}
             if path == "/api/message/delete":
                 msg = ws.db.one("SELECT room FROM messages WHERE id = ?", (int(body["id"]),))

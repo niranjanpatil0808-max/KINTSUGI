@@ -23,6 +23,8 @@ def reply(messages):
         return "Done! `17 * 23 = 391`.\n\n```python\nprint(17 * 23)\n```"
     if "python" in trigger:
         return '```tool\n{"tool": "run_python", "args": {"code": "print(17 * 23)"}}\n```'
+    if "note this down" in trigger:
+        return '```tool\n{"tool": "remember", "args": {"text": "The team prefers short answers with a next step."}}\n```'
     if "missing" in trigger:
         return '```tool\n{"tool": "read_file", "args": {"path": "missing.txt"}}\n```'
     return "Hello! Here is a **list**:\n\n- one\n- two\n\n```python\nprint('hi')\n```\n\n[a link](https://example.com) <script>alert(1)</script>"

@@ -19,7 +19,11 @@ const BASE = process.env.BASE_URL || 'http://127.0.0.1:8804';
   await p.waitForFunction(() => document.title === 'Kintsugi', null, { timeout: 8000 });
   if ((await p.locator('#sidebar .item:has-text("alice") .dot').count()) !== 0) errs.push('dot did not clear');
   // our own message never marks a chat unread
-  await p.fill('#msg', 'thanks'); await p.keyboard.press('Enter'); await p.waitForSelector('.row:not(.me) .body');
+  const replies = await p.locator('.row:not(.me) .body').count();
+  await p.fill('#msg', 'thanks'); await p.keyboard.press('Enter');
+  // wait for alice's answer to THIS message: an answer arriving after we leave would rightly mark the chat unread
+  await p.waitForFunction((n) => document.querySelectorAll('.row:not(.me) .body').length > n, replies, { timeout: 15000 });
+  await p.waitForFunction(() => !(S.state && S.state.busy.length), null, { timeout: 15000 });
   await p.click('#sidebar .item:has-text("team")');
   await p.waitForTimeout(2500);
   if (await p.evaluate(() => document.title) !== 'Kintsugi') errs.push('title shows unread after our own message: ' + await p.evaluate(() => document.title));

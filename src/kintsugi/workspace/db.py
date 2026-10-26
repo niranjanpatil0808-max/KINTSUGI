@@ -57,6 +57,9 @@ CREATE INDEX IF NOT EXISTS tasks_room ON tasks(room, updated);
 CREATE INDEX IF NOT EXISTS tasks_message ON tasks(message_id);
 CREATE TABLE IF NOT EXISTS feedback (
     user TEXT NOT NULL, message_id INTEGER NOT NULL, good INTEGER NOT NULL, ts REAL NOT NULL, PRIMARY KEY (user, message_id));
+CREATE TABLE IF NOT EXISTS pins (
+    message_id INTEGER PRIMARY KEY, room TEXT NOT NULL, by TEXT NOT NULL, ts REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS pins_room ON pins(room, ts);
 CREATE TABLE IF NOT EXISTS deleted_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT NOT NULL, message_id INTEGER NOT NULL, ts REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (

@@ -92,7 +92,8 @@ async function setupWizard() {
         await api("/api/providers/save", {id, label: p.label, kind: p.kind, base_url: p.base_url, model: model.value.trim(), key: key.value, keyless: !!p.keyless, make_default: true});
         const r = await api("/api/providers/test", {id, model: model.value.trim() || undefined});
         if (r.ok) { out.textContent = "It works." + (r.reply ? " The model replied: " + r.reply : ""); setTimeout(stepTeam, 700); return; }
-        fill(out, "That did not work: " + r.error + (r.models && r.models.length ? " Models your key can use: " + r.models.slice(0, 12).join(", ") : ""));
+        fill(out, "That did not work: " + r.error, r.models && r.models.length ? h("div", {class: "model-chips", style: "margin-top:8px"}, h("div", {class: "muted", style: "font-size:13px;width:100%"}, "Your key can use these models. Tap one to try it:"),
+          r.models.slice(0, 40).map((m) => h("button", {class: "chip", onclick: () => { model.value = m; go.click(); }}, m))) : null);
       } catch (e) { fill(out, e.message); }
       go.disabled = false; model.focus();
     };

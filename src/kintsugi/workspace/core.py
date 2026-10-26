@@ -809,7 +809,7 @@ class Workspace:
 
     def delete_room(self, room: str) -> None:
         self._require_room(room)
-        for table in ("messages", "members", "jobs", "approvals", "notes"):
+        for table in ("messages", "members", "jobs", "approvals", "notes", "pins"):
             self.db.execute(f"DELETE FROM {table} WHERE room = ?", (room,))
         self.db.execute("DELETE FROM rooms WHERE name = ?", (room,))
         compact.forget(self, room)
@@ -833,10 +833,45 @@ class Workspace:
         self.db.execute("UPDATE tasks SET result_id = NULL WHERE result_id = ?", (row["id"],))
         self.db.execute("UPDATE tasks SET title = '(message deleted)', message_id = NULL WHERE message_id = ?", (row["id"],))  # the title is the deleted text
         self.db.execute("DELETE FROM feedback WHERE message_id = ?", (row["id"],))
+        self.db.execute("DELETE FROM pins WHERE message_id = ?", (row["id"],))
         self.db.execute("INSERT INTO deleted_messages (room, message_id, ts) VALUES (?, ?, ?)", (row["room"], row["id"], self.clock()))
         self.db.execute("DELETE FROM deleted_messages WHERE id NOT IN (SELECT id FROM deleted_messages ORDER BY id DESC LIMIT 500)")  # other open screens only need the recent ones
         compact.forget(self, row["room"])
         self.audit(None, "message-deleted", f"#{row['id']} in {row['room']} by {who}")
+
+    MAX_PINS = 50
+
+    def toggle_pin(self, message_id: int, who: str) -> bool:
+        """Pin a message to the top of its room for everyone in it, or unpin it. Returns whether it is now pinned."""
+        row = self.db.one("SELECT id, room FROM messages WHERE id = ?", (int(message_id),))
+        if row is None:
+            raise WorkspaceError("no such message")
+        if self.db.one("SELECT 1 FROM pins WHERE message_id = ?", (row["id"],)):
+            self.db.execute("DELETE FROM pins WHERE message_id = ?", (row["id"],))
+            self.audit(None, "unpinned", f"#{row['id']} in {row['room']} by {who}")
+            return False
+        if self.db.one("SELECT COUNT(*) AS n FROM pins WHERE room = ?", (row["room"],))["n"] >= self.MAX_PINS:
+            raise WorkspaceError(f"at most {self.MAX_PINS} pinned messages in a room: unpin one first")
+        self.db.execute("INSERT INTO pins (message_id, room, by, ts) VALUES (?, ?, ?, ?)", (row["id"], row["room"], who, self.clock()))
+        self.audit(None, "pinned", f"#{row['id']} in {row['room']} by {who}")
+        return True
+
+    def pins(self, room: str) -> list[dict]:
+        return self.db.query("SELECT m.id, m.sender, m.text, m.ts, p.by, p.ts AS pinned_at FROM pins p JOIN messages m ON m.id = p.message_id "
+                             "WHERE p.room = ? ORDER BY p.ts DESC", (room,))
+
+    def notes_of(self, agent: str) -> list[dict]:
+        """Everything an agent saved with `remember`, newest first (the caller filters by who may see which chat)."""
+        self.get_agent(agent)
+        return self.db.query("SELECT id, text, ts, room FROM notes WHERE agent = ? ORDER BY id DESC LIMIT 500", (agent,))
+
+    def delete_note(self, note_id: int, who: str) -> dict:
+        row = self.db.one("SELECT id, agent, room FROM notes WHERE id = ?", (int(note_id),))
+        if row is None:
+            raise WorkspaceError("no such note")
+        self.db.execute("DELETE FROM notes WHERE id = ?", (row["id"],))
+        self.audit(row["agent"], "note-deleted", f"#{row['id']} by {who}")
+        return row
 
     def purge_messages(self, older_than_days: float) -> int:
         """Delete messages older than the given number of days (and old audit entries). Returns how many messages."""
@@ -844,6 +879,7 @@ class Workspace:
         count = self.db.one("SELECT COUNT(*) AS n FROM messages WHERE ts < ?", (cutoff,))["n"]
         self.db.execute("DELETE FROM messages WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM audit WHERE ts < ?", (cutoff,))
+        self.db.execute("DELETE FROM pins WHERE message_id NOT IN (SELECT id FROM messages)")
         if count:
             compact.forget(self)  # a summary must not outlive the messages it came from
         self.audit(None, "purged", f"{count} messages older than {older_than_days:g} days")

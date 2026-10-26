@@ -242,3 +242,11 @@ prefill the composer via /?share_text= (never auto-sent).
 ## Update: research archive move done (user said yes)
 benchmark/ -> research/benchmark/, results/ -> research/results/ (also workspace_smoke/study outputs), RESULTS.md -> research/RESULTS.md. Paths fixed in benchmark scripts,
 .github/workflows (benchmark paths trigger is now research/benchmark/run.config), examples, docs, SPEC, .gitignore, .dockerignore, tests. 602 unit tests OK; check_tasks 42/42.
+
+## Update: features round (user: "make this the best version possible for phone and pc")
+web/more.js (loaded after extras.js, in index.html and the service-worker shell): replies (quote line "> ↩ **name**: text" + blank line; rendered as .quote;
+swipe right on touch; reply bar in composer; Esc cancels), phone "More" sheet for rarer message buttons (.sec hidden on pointer:coarse), pinned messages
+(table pins, /api/pins, /api/pins/toggle, per-room count in state, strip under the brief, dialog with Show/Unpin; max 50/room; removed with message/room/purge),
+Details > Memory tab (/api/notes filtered by chats the viewer can see; chat-less old notes admins only; /api/notes/delete), drag-and-drop and paste of files,
+model buttons after a provider test (Settings > Models and the setup wizard), keyboard shortcuts (? list, Alt+Up/Down chats). Meta Llama API preset verified
+reachable (401 without key, 404 wrong path) from a Vercel sandbox. Tests: tests/test_workspace_pins_notes.py, tests/ui/v2.js.
